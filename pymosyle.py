@@ -152,7 +152,8 @@ class MosyleAPI():
         """
         data = {
             'options': {
-                'os': os_type
+                'os': os_type,
+                'page': 0
             }
         }
         for additional_filter_key in additional_filters.keys():
@@ -168,7 +169,7 @@ class MosyleAPI():
             if max_results != -1 and len(devices) >= max_results:
                 has_more = False
                 break
-            data['page'] = page
+            data['options']['page'] = page
             logger.debug(f"Retrieving list of devices, page {page}")
             response = self.execute_request("POST", "listdevices", data)
             for device in response['devices']:
