@@ -10,20 +10,29 @@ from loguru import logger
 
 
 class MosyleAPI():
-    def __init__(self, token: str, email: str, password: str, base_url : str = "https://managerapi.mosyle.com/v2"):
+    def __init__(self, token: str, email: str, password: str, base_url : str = None, tenant_type: str = "school"):
         """
         Creates a new instance of the Mosyle API.
         :param token: Access token provided by the Mosyle integration
         :param email: Email address for a Mosyle admin account with API permission
         :param password: Password for the Mosyle admin account
-        :param base_url: Optional, Base URL for the Mosyle API, this usually is not required to be changed
+        :param base_url: Optional, Base URL for the Mosyle API, this usually is not required to be changed, specify None to autodetect
+        :param tenant_type: Optional, either "school" for Mosyle Manager or "business" for Mosyle Business
         """
+        if base_url is None:
+            if tenant_type == "school":
+                base_url = "https://managerapi.mosyle.com/v2"
+            else:
+                base_url = "https://businessapi.mosyle.com/v1"
+        
         self.base_url = base_url
+        self.tenant_type = tenant_type
         self.token = token
         self.email = email
         self.password = password
         self.bearer_token = None
         self.last_token_update = 0
+        
 
     def retrieve_jwt(self) -> bool:
         """
@@ -32,8 +41,10 @@ class MosyleAPI():
         """
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "pymosyle"
+            "User-Agent": "pymosyle",
         }
+        if self.tenant_type == "business":
+            headers["accessToken"] = self.token
         data = {
             "accessToken": self.token,
             "email": self.email,
@@ -76,8 +87,10 @@ class MosyleAPI():
 
         headers = {
             "User-Agent": "pymosyle",
-            "Authorization": self.bearer_token
+            "Authorization": self.bearer_token,
         }
+        if self.tenant_type == "business":
+            headers["accessToken"] = self.token
 
         full_url = f"{self.base_url}/{url}"
         logger.debug(f"Request: {method} {full_url}")
@@ -150,12 +163,19 @@ class MosyleAPI():
         :param additional_filters: Additional filters for the device list, see Mosyle API docs for more details.
         :return: List of devices
         """
+        if self.tenant_type == "business" and os_type == "macos":
+            os_type = "mac"
+            
         data = {
             'options': {
                 'os': os_type,
                 'page': 0
             }
         }
+
+        if self.tenant_type == "business":
+            data['operation'] = "list"
+
         for additional_filter_key in additional_filters.keys():
             data['options'][additional_filter_key] = additional_filters[additional_filter_key]
         if len(tags) > 0:
@@ -170,8 +190,13 @@ class MosyleAPI():
                 has_more = False
                 break
             data['options']['page'] = page
+
             logger.debug(f"Retrieving list of devices, page {page}")
-            response = self.execute_request("POST", "listdevices", data)
+            if self.tenant_type == "school":
+                response = self.execute_request("POST", "listdevices", data)
+            else:
+                response = self.execute_request("POST", "devices", data)[0]
+
             for device in response['devices']:
                 devices.append(device)
             page = page + 1
@@ -188,15 +213,29 @@ class MosyleAPI():
         :param attributes: Dictionary of attributes to update and their new values
         :return: New device data after the update
         """
-        data = {
-            "elements": [
-                {
-                    "serialnumber": serial_number
-                }
-            ]
-        }
-        for attribute_key in attributes.keys():
-            data['elements'][0][attribute_key] = attributes[attribute_key]
+        if self.tenant_type == "school":
+            data = {
+                "elements": [
+                    {
+                        "serialnumber": serial_number
+                    }
+                ]
+            }
+
+            for attribute_key in attributes.keys():
+                data['elements'][0][attribute_key] = attributes[attribute_key]
+        else:
+            if (os_type == "macos"):
+                os_type = "mac"
+
+            data = {
+                "operation": "update_device",
+                "serialnumber": serial_number
+            }
+
+            for attribute_key in attributes.keys():
+                data[attribute_key] = attributes[attribute_key]
+
         logger.debug(f"Updating device {serial_number}, new data {attributes}")
         response = self.execute_request("POST", "devices", data)
 
